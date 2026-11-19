@@ -11,5 +11,3 @@ def home():
     <p>Successfully deployed using Render!</p>
     """
 
-if __name__ == "__main__":
-    app.run()
