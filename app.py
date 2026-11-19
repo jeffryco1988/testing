@@ -1,86 +1,72 @@
+import os
 from flask import Flask, request, session
+from openai import OpenAI
 
 app = Flask(__name__)
-app.secret_key = "change-this-to-a-random-secret-key"  # needed for session
+app.secret_key = "change-this-to-a-random-secret-key"
 
-def get_response(user_input):
-    """Simple rule-based virtual assistant logic."""
-    text = user_input.lower().strip()
+# Initialize OpenAI client (will automatically read OPENAI_API_KEY environment variable)
+client = OpenAI(api_key=os.environ.get("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"))
 
-    # Greetings
-    if any(word in text for word in ["hello", "hi", "hey", "hola"]):
-        return "Hi there! 👋 I'm your virtual assistant. How can I help you today?"
+# System prompt to define the assistant's persona
+SYSTEM_PROMPT = "You are a simple, friendly virtual assistant. Keep responses concise and helpful."
 
-    # Name introduction
-    if "my name is" in text:
-        name = user_input.split("my name is", 1)[1].strip().title()
-        session["user_name"] = name
-        return f"Nice to meet you, {name}! 😊"
+def get_ai_response(user_message, chat_history):
+    """Call OpenAI API to get a response and return the updated chat history."""
+    # Build the message list for this request
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + chat_history
+    messages.append({"role": "user", "content": user_message})
 
-    # Asking for the name back
-    if "what is my name" in text or "who am i" in text:
-        name = session.get("user_name")
-        return f"You told me your name is {name}." if name else "I don't know your name yet. Tell me: 'My name is ...'"
+    try:
+        # Call Chat Completions API (non-streaming for simplicity)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Can be changed to gpt-4o, etc.
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
+        reply = response.choices[0].message.content
+    except Exception as e:
+        # Return a friendly error message when API call fails
+        reply = f"Sorry, I encountered an error while processing your request: {str(e)}"
 
-    # Time
-    if "time" in text:
-        from datetime import datetime
-        return f"The current time is {datetime.now().strftime('%H:%M')}."
+    # Update chat history: add user message and assistant reply
+    chat_history.append({"role": "user", "content": user_message})
+    chat_history.append({"role": "assistant", "content": reply})
+    
+    return reply, chat_history
 
-    # Date
-    if "date" in text or "today" in text:
-        from datetime import datetime
-        return f"Today is {datetime.now().strftime('%A, %d %B %Y')}."
-
-    # Weather (no real API — just a canned reply)
-    if "weather" in text:
-        return "Sorry, I can't check live weather yet, but it's always a good day to code! ☀️"
-
-    # Jokes
-    if "joke" in text:
-        return "Why do programmers prefer dark mode? Because light attracts bugs! 🐛"
-
-    # Help
-    if "help" in text:
-        return ("You can try: 'hello', 'my name is ...', 'what is my name?', "
-                "'time', 'date', 'joke', 'help', or 'bye'.")
-
-    # Goodbye
-    if any(word in text for word in ["bye", "goodbye", "see you"]):
-        return "Goodbye! 👋 Have a great day!"
-
-    # Fallback
-    return "I'm not sure how to answer that. Type 'help' to see what I can do."
 
 @app.route("/", methods=["GET", "POST"])
 def home():
+    # Initialize chat history (only store user/assistant messages, system prompt is added dynamically each time)
     if "chat" not in session:
         session["chat"] = []
 
     if request.method == "POST":
-        user_message = request.form.get("message", "")
-        if user_message.strip():
-            reply = get_response(user_message)
-            chat = session["chat"]
-            chat.append({"user": user_message, "bot": reply})
-            session["chat"] = chat  # save back to session
+        user_message = request.form.get("message", "").strip()
+        if user_message:
+            # Get AI reply and updated history
+            reply, updated_history = get_ai_response(user_message, session["chat"])
+            session["chat"] = updated_history  # Save back to session
 
-    # Build the chat log HTML
+    # Build chat log HTML
     chat_html = ""
     for msg in session.get("chat", []):
+        role = "You" if msg["role"] == "user" else "Assistant"
+        css_class = "user" if msg["role"] == "user" else "bot"
         chat_html += f"""
-            <div class="msg user"><b>You:</b> {msg['user']}</div>
-            <div class="msg bot"><b>Assistant:</b> {msg['bot']}</div>
+            <div class="msg {css_class}"><b>{role}:</b> {msg['content']}</div>
         """
 
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>My Virtual Assistant</title>
+        <title>My AI Assistant</title>
         <style>
             body {{
-                font-family: Arial;
+                font-family: Arial, sans-serif;
                 background: #f2f2f2;
                 margin: 0;
                 padding: 40px 0;
@@ -88,14 +74,14 @@ def home():
             .container {{
                 background: white;
                 padding: 25px;
-                width: 500px;
+                width: 550px;
                 margin: auto;
                 border-radius: 12px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             }}
             h1 {{ text-align: center; color: #2c3e50; }}
             .chat {{
-                max-height: 350px;
+                max-height: 400px;
                 overflow-y: auto;
                 border: 1px solid #ddd;
                 border-radius: 8px;
@@ -103,7 +89,7 @@ def home():
                 margin-bottom: 15px;
                 background: #fafafa;
             }}
-            .msg {{ padding: 8px 10px; margin: 6px 0; border-radius: 8px; }}
+            .msg {{ padding: 8px 10px; margin: 6px 0; border-radius: 8px; white-space: pre-wrap; }}
             .user {{ background: #d6eaff; text-align: right; }}
             .bot  {{ background: #e9f7e9; text-align: left; }}
             form {{ display: flex; gap: 8px; }}
@@ -121,8 +107,8 @@ def home():
     </head>
     <body>
         <div class="container">
-            <h1>🤖 My Virtual Assistant</h1>
-            <div class="chat">{chat_html or "<p style='color:#888;'>Say hello to start chatting...</p>"}</div>
+            <h1>🤖 My OpenAI Assistant</h1>
+            <div class="chat">{chat_html or "<p style='color:#888;'>Send a message to start chatting...</p>"}</div>
             <form method="POST" autocomplete="off">
                 <input type="text" name="message" placeholder="Type a message..." autofocus required>
                 <button type="submit">Send</button>
@@ -131,3 +117,6 @@ def home():
     </body>
     </html>
     """
+
+if __name__ == "__main__":
+    app.run(debug=True)
